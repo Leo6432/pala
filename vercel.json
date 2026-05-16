@@ -9,10 +9,6 @@
       "config": {
         "includeFiles": ["src/**", "templates/**"]
       }
-    },
-    {
-      "src": "static/**",
-      "use": "@vercel/static"
     }
   ]
 }
