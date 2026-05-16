@@ -1,17 +1,20 @@
-from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse
-from fastapi.staticfiles import StaticFiles
-from fastapi.templating import Jinja2Templates
-import uvicorn
+import sys
 import os
 
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
+
+from fastapi import FastAPI, Request
+from fastapi.responses import HTMLResponse
+from fastapi.templating import Jinja2Templates
+
 from paladium_api import get_market_prices, get_item_history, get_server_status
-from analyzer import analyze_all_items, compute_recommendation
+from analyzer import analyze_all_items
 from mock_data import MOCK_MARKET, MOCK_HISTORIES, MOCK_STATUS
 
 app = FastAPI(title="Paladium Market Dashboard")
-app.mount("/static", StaticFiles(directory=os.path.join(os.path.dirname(__file__), "../static")), name="static")
-templates = Jinja2Templates(directory=os.path.join(os.path.dirname(__file__), "../templates"))
+
+TEMPLATES_DIR = os.path.join(os.path.dirname(__file__), '..', 'templates')
+templates = Jinja2Templates(directory=TEMPLATES_DIR)
 
 USE_MOCK = os.getenv("USE_MOCK", "true").lower() == "true"
 
@@ -58,7 +61,3 @@ async def api_status():
     if USE_MOCK:
         return MOCK_STATUS
     return get_server_status() or MOCK_STATUS
-
-
-if __name__ == "__main__":
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
