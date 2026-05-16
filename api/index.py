@@ -8,6 +8,12 @@ from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
+# ── Config ────────────────────────────────────────────────────────────────────
+
+BASE_URL = "https://api.paladium.games/v1"
+API_KEY = os.getenv("PALADIUM_API_KEY", "")
+USE_MOCK = os.getenv("USE_MOCK", "true").lower() == "true" or not API_KEY
+
 # ── Mock data ────────────────────────────────────────────────────────────────
 
 def _gen_history(base: float, days: int = 30, vol: float = 0.15) -> list[dict]:
@@ -20,46 +26,111 @@ def _gen_history(base: float, days: int = 30, vol: float = 0.15) -> list[dict]:
     return history
 
 MOCK_MARKET = [
-    {"id": "diamond",        "display_name": "Diamant",             "price": 2800},
-    {"id": "iron_ingot",     "display_name": "Lingot de Fer",       "price": 45},
-    {"id": "gold_ingot",     "display_name": "Lingot d'Or",         "price": 380},
-    {"id": "emerald",        "display_name": "Emeraude",            "price": 120},
-    {"id": "netherite_ingot","display_name": "Lingot de Netherite", "price": 85000},
-    {"id": "redstone",       "display_name": "Redstone",            "price": 12},
-    {"id": "lapis_lazuli",   "display_name": "Lapis Lazuli",        "price": 55},
-    {"id": "coal",           "display_name": "Charbon",             "price": 8},
-    {"id": "obsidian",       "display_name": "Obsidienne",          "price": 95},
-    {"id": "blaze_rod",      "display_name": "Baton de Blaze",      "price": 220},
-    {"id": "ender_pearl",    "display_name": "Perle de l'Ender",    "price": 175},
-    {"id": "slimeball",      "display_name": "Boule de Slime",      "price": 68},
+    {"id": "diamond",         "display_name": "Diamant",             "price": 2800},
+    {"id": "iron_ingot",      "display_name": "Lingot de Fer",       "price": 45},
+    {"id": "gold_ingot",      "display_name": "Lingot d'Or",         "price": 380},
+    {"id": "emerald",         "display_name": "Emeraude",            "price": 120},
+    {"id": "netherite_ingot", "display_name": "Lingot de Netherite", "price": 85000},
+    {"id": "redstone",        "display_name": "Redstone",            "price": 12},
+    {"id": "lapis_lazuli",    "display_name": "Lapis Lazuli",        "price": 55},
+    {"id": "coal",            "display_name": "Charbon",             "price": 8},
+    {"id": "obsidian",        "display_name": "Obsidienne",          "price": 95},
+    {"id": "blaze_rod",       "display_name": "Baton de Blaze",      "price": 220},
+    {"id": "ender_pearl",     "display_name": "Perle de l'Ender",    "price": 175},
+    {"id": "slimeball",       "display_name": "Boule de Slime",      "price": 68},
 ]
 MOCK_HISTORIES = {item["id"]: _gen_history(item["price"]) for item in MOCK_MARKET}
 MOCK_STATUS = {"online": True, "players": random.randint(800, 2400), "max_players": 3000}
 
 # ── Paladium API ──────────────────────────────────────────────────────────────
 
-BASE_URL = "https://api.paladium.games/v1"
 _cache: dict = {}
 
-def _get(url: str) -> dict | list | None:
+def _get(path: str, ttl: int = 60) -> dict | list | None:
     now = time.time()
-    if url in _cache and now - _cache[url]["ts"] < 60:
-        return _cache[url]["data"]
+    if path in _cache and now - _cache[path]["ts"] < ttl:
+        return _cache[path]["data"]
     try:
-        r = httpx.get(url, timeout=10)
+        r = httpx.get(
+            f"{BASE_URL}{path}",
+            headers={"Authorization": f"Bearer {API_KEY}"},
+            timeout=10,
+        )
         r.raise_for_status()
         data = r.json()
-        _cache[url] = {"data": data, "ts": now}
+        _cache[path] = {"data": data, "ts": now}
         return data
-    except Exception:
+    except Exception as e:
+        print(f"[API] {path} → {e}")
         return None
+
+def get_status():
+    return _get("/status", ttl=30)
+
+def get_market_items():
+    # Returns list of market items
+    return _get("/paladium/shop/market/items", ttl=60)
+
+def get_market_categories():
+    return _get("/paladium/shop/market/categories", ttl=300)
+
+def get_item_detail(item_id: str):
+    return _get(f"/paladium/shop/market/items/{item_id}", ttl=60)
+
+def get_item_history(item_id: str):
+    return _get(f"/paladium/shop/market/items/{item_id}/history", ttl=120)
+
+# ── Normalise API responses ───────────────────────────────────────────────────
+
+def _normalise_market(raw: list | dict | None) -> list[dict]:
+    """Convert the Paladium market response to [{id, display_name, price}]."""
+    if not raw:
+        return []
+    items = raw if isinstance(raw, list) else raw.get("items") or raw.get("data") or []
+    result = []
+    for item in items:
+        iid = item.get("id") or item.get("item") or item.get("name") or ""
+        name = item.get("displayName") or item.get("display_name") or item.get("name") or iid
+        price = item.get("price") or item.get("lastPrice") or item.get("currentPrice") or 0
+        if iid:
+            result.append({"id": iid, "display_name": name, "price": float(price)})
+    return result
+
+def _normalise_history(raw: list | dict | None) -> list[dict]:
+    """Convert the Paladium history response to [{date, price, volume}]."""
+    if not raw:
+        return []
+    entries = raw if isinstance(raw, list) else raw.get("history") or raw.get("data") or []
+    result = []
+    for e in entries:
+        ts = e.get("timestamp") or e.get("date") or e.get("time") or ""
+        price = e.get("price") or e.get("averagePrice") or e.get("value") or 0
+        vol = e.get("volume") or e.get("quantity") or 0
+        if ts and price:
+            # Convert unix timestamp to date string if needed
+            if isinstance(ts, (int, float)):
+                ts = datetime.utcfromtimestamp(ts).strftime("%Y-%m-%d")
+            result.append({"date": str(ts)[:10], "price": float(price), "volume": int(vol)})
+    return result
+
+def _normalise_status(raw: dict | None) -> dict:
+    if not raw:
+        return {"online": False, "players": 0, "max_players": 3000}
+    # The status response has nested server info
+    java = raw.get("java") or {}
+    global_ = java.get("global") or {}
+    online = raw.get("online") if "online" in raw else True
+    players = global_.get("players") or raw.get("players") or 0
+    max_p = global_.get("maxPlayers") or raw.get("maxPlayers") or raw.get("max_players") or 3000
+    return {"online": online, "players": players, "max_players": max_p}
 
 # ── Analyzer ─────────────────────────────────────────────────────────────────
 
 def _recommend(history: list[dict]) -> dict:
     if not history or len(history) < 3:
         return {"action": "attendre", "reason": "Pas assez de donnees", "confidence": 0,
-                "current_price": 0, "avg_price": 0, "min_price": 0, "max_price": 0, "trend_pct": 0, "score": 0}
+                "current_price": 0, "avg_price": 0, "min_price": 0, "max_price": 0,
+                "trend_pct": 0, "score": 0}
     prices = [h["price"] for h in history if "price" in h]
     current, avg = prices[-1], sum(prices) / len(prices)
     min_p, max_p = min(prices), max(prices)
@@ -101,18 +172,28 @@ def _analyze(market, histories):
 
 app = FastAPI()
 
-USE_MOCK = os.getenv("USE_MOCK", "true").lower() == "true"
-
 TEMPLATES_DIR = os.path.join(os.path.dirname(__file__), "..", "templates")
 templates = Jinja2Templates(directory=TEMPLATES_DIR)
+
 
 def _data():
     if USE_MOCK:
         return MOCK_MARKET, MOCK_HISTORIES, MOCK_STATUS
-    market = _get(f"{BASE_URL}/market/prices") or MOCK_MARKET
-    status = _get(f"{BASE_URL}/status") or MOCK_STATUS
-    histories = {item.get("id", ""): (_get(f"{BASE_URL}/market/history/{item.get('id','')}") or []) for item in market}
+
+    raw_market = get_market_items()
+    market = _normalise_market(raw_market) or MOCK_MARKET
+
+    raw_status = get_status()
+    status = _normalise_status(raw_status)
+
+    histories = {}
+    for item in market:
+        iid = item["id"]
+        raw_h = get_item_history(iid)
+        histories[iid] = _normalise_history(raw_h)
+
     return market, histories, status
+
 
 @app.get("/", response_class=HTMLResponse)
 async def dashboard(request: Request):
@@ -131,10 +212,10 @@ async def api_items():
 async def api_history(item_id: str):
     if USE_MOCK:
         return MOCK_HISTORIES.get(item_id, [])
-    return _get(f"{BASE_URL}/market/history/{item_id}") or []
+    return _normalise_history(get_item_history(item_id))
 
 @app.get("/api/status")
 async def api_status():
     if USE_MOCK:
         return MOCK_STATUS
-    return _get(f"{BASE_URL}/status") or MOCK_STATUS
+    return _normalise_status(get_status())
