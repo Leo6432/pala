@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Paladium Market Dashboard</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <link rel="stylesheet" href="/static/css/style.css" />
+</head>
+<body>
+  <header>
+    <div class="header-inner">
+      <h1><span class="icon">⚔️</span> Paladium Market Dashboard</h1>
+      <div class="server-status">
+        {% if status.online %}
+          <span class="status-dot online"></span>
+          <span>{{ status.players }} / {{ status.max_players }} joueurs</span>
+        {% else %}
+          <span class="status-dot offline"></span>
+          <span>Serveur hors ligne</span>
+        {% endif %}
+        {% if use_mock %}
+          <span class="mock-badge">Données démo</span>
+        {% endif %}
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <section class="top-picks">
+      <h2>Meilleures opportunités d'achat</h2>
+      <div class="cards">
+        {% for item in items[:3] %}
+        <div class="card action-{{ item.action }}">
+          <div class="card-action">{{ item.action | upper }}</div>
+          <div class="card-name">{{ item.name }}</div>
+          <div class="card-price">{{ "{:,.0f}".format(item.current_price) }} 💰</div>
+          <div class="card-confidence">Confiance : {{ item.confidence }}%</div>
+          <div class="card-reason">{{ item.reason }}</div>
+        </div>
+        {% endfor %}
+      </div>
+    </section>
+
+    <section class="market-table-section">
+      <h2>Tous les articles</h2>
+      <div class="filters">
+        <input type="text" id="search" placeholder="Rechercher un article..." />
+        <select id="filter-action">
+          <option value="">Toutes les actions</option>
+          <option value="acheter">Acheter</option>
+          <option value="attendre">Attendre</option>
+          <option value="vendre">Vendre</option>
+        </select>
+        <button onclick="refreshData()">Actualiser</button>
+      </div>
+      <table id="market-table">
+        <thead>
+          <tr>
+            <th>Article</th>
+            <th>Prix actuel</th>
+            <th>Moy.</th>
+            <th>Min</th>
+            <th>Max</th>
+            <th>Tendance</th>
+            <th>Action</th>
+            <th>Confiance</th>
+            <th>Raison</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for item in items %}
+          <tr class="row-{{ item.action }}" data-action="{{ item.action }}" data-name="{{ item.name | lower }}" data-id="{{ item.id }}" onclick="showChart('{{ item.id }}', '{{ item.name }}')">
+            <td><strong>{{ item.name }}</strong></td>
+            <td>{{ "{:,.0f}".format(item.current_price) }} 💰</td>
+            <td>{{ "{:,.0f}".format(item.avg_price) }}</td>
+            <td>{{ "{:,.0f}".format(item.min_price) }}</td>
+            <td>{{ "{:,.0f}".format(item.max_price) }}</td>
+            <td class="trend {% if item.trend_pct > 0 %}trend-up{% elif item.trend_pct < 0 %}trend-down{% endif %}">
+              {% if item.trend_pct > 0 %}▲{% elif item.trend_pct < 0 %}▼{% else %}—{% endif %}
+              {{ "{:.1f}".format(item.trend_pct) }}%
+            </td>
+            <td><span class="badge badge-{{ item.action }}">{{ item.action }}</span></td>
+            <td>
+              <div class="confidence-bar">
+                <div class="confidence-fill" style="width: {{ item.confidence }}%"></div>
+              </div>
+              {{ item.confidence }}%
+            </td>
+            <td class="reason-cell">{{ item.reason }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </section>
+
+    <!-- Chart modal -->
+    <div id="chart-modal" class="modal hidden">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h3 id="modal-title">Historique des prix</h3>
+          <button onclick="closeChart()">✕</button>
+        </div>
+        <canvas id="price-chart"></canvas>
+        <div id="modal-rec"></div>
+      </div>
+    </div>
+  </main>
+
+  <script src="/static/js/app.js"></script>
+</body>
+</html>
